@@ -1,0 +1,70 @@
+\documentclass[12pt]{scrartcl}
+\usepackage[latin1]{inputenc} 
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{fancyhdr}
+\usepackage[pdftex]{graphicx}
+\usepackage{floatflt,epsfig}
+\usepackage{float}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage[ngerman]{babel}
+\usepackage{lmodern}
+\usepackage[bookmarks=true, bookmarksnumbered=false, bookmarksopen=false,colorlinks=false]{hyperref}
+\usepackage{enumerate}
+\usepackage{a4wide}
+\usepackage{wrapfig}
+\usepackage{marvosym}
+\usepackage{geometry}
+\setcounter{tocdepth}{2}
+\setcounter{secnumdepth}{3}
+\renewcommand{\rmdefault}{\sfdefault}
+\Large
+\geometry{paper=a4paper, left=35mm, right=35mm, top=35mm, bottom=30mm} 
+\begin{document}
+
+\input{./title.tex}
+
+\pagebreak
+\pagenumbering{gobble}
+\tableofcontents
+
+\pagebreak
+\pagenumbering{arabic}
+%\begin{abstract}
+% This is where I will write something short about my master thesis etc. bla bla bla
+%\end{abstract}
+%\pagebreak
+\pagestyle{fancy}
+\renewcommand{\sectionmark}[1]{\markboth{\thesection. #1}{}}
+\section{Introduction}
+\input{./introduction.tex}
+
+\section{Methodology}
+\input{./methodology.tex}
+
+\section{Data}
+\input{./data.tex}
+
+\section{Results}
+\input{./results.tex}
+
+\section{Discussion}
+\input{./discussion.tex}
+
+\section{Conclusions and Outlook}
+\input{./outlook.tex}
+
+%\addcontentsline{toc}{section}{Anhang}
+\appendix
+\section{Appendix}
+\input{./appendix.tex}
+
+\addcontentsline{toc}{section}{References}
+\begin{thebibliography}{}
+	\bibitem{lit1} 
+		Dies ist ein Platzhalter!
+\end{thebibliography}
+
+
+\end{document}

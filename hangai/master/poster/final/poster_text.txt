@@ -1,0 +1,8 @@
+Introduction:
+
+For the recent MT measurements across the Hangai Mountains, Mongolia, we used a 
+combination of full Mt stations and telluric only recordings. This procedure 
+turned out to be very efficient the field. However, it remains questionable, 
+under which circumstances the local magnetic fields can be replaced with the 
+recordings from a remote station. Obvious pssueds that might be enc ountered are 
+effects due to local conductivity anomalies and due to source field effects.

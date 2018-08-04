@@ -1,0 +1,19 @@
+function out = read_inf(filename)
+
+    fid = fopen(filename,'r');
+    out = struct;
+    while ~feof(fid)
+        str = fgetl(fid);
+        if strcmp(str(1),'>');
+            fieldname = str(2:17);
+            while strcmp(fieldname(end),' ')
+                fieldname(end) = [];
+            end
+            out.(fieldname) = str(19:end);
+        end
+        
+    end
+    
+    
+    
+    fclose(fid);

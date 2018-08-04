@@ -1,0 +1,18 @@
+% changes in the emts matlab code
+
+- out of quadrant-phases are now displayed correctly
+- fixed/added new regression methods
+      - simple least-squares regression (regress)
+      - simple least-squares regression with MCD cutoff (regress_MCDcutoff)
+      - robust m-estimator with mahalanobis cutoff (Mestimate_mahalcutoff)
+      - robust m-estimator with MCD cutoff (Mestimate_MCDcutoff)
+      - robust MCD regression (mcdregress)
+      - least trimmed squares regression (ltsregress) // not really tested
+      - robust m-estimator from auto-/crossspectra (spectra) // not really tested, see paper ....
+- fixed error bars for mcdregress, regress and regress_MCDcutoff
+- added remote reference for mcdregress, regress and regress_MCDcutoff
+- fixed calibration for GEOMAG fluxgates
+- fixed removing of nans after robust processing
+
+
+....

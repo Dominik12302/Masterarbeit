@@ -1,0 +1,39 @@
+p           = 'F:\Hangai.2016';
+datapath    = {'edi'};
+%usestations = {'all'};
+latlim      = [44 49];
+lonlim      = [98 102];
+utmzone     = '35';
+hemisphere  = 'N';
+porigin     = [45+31.361/60 100+41.063/60 ];
+porient     = 90;
+%
+tfs         = TFs;
+tfs.datapath= datapath;
+tfs.latlim  = latlim;
+tfs.lonlim  = lonlim;
+tfs.utmzone = utmzone;
+tfs.hemisphere=hemisphere;
+tfs.porigin = porigin;
+tfs.porient = porient;
+
+tfs         = TFs(tfs,p);
+%%
+tfs.ylim = [-1 17];
+tfs.Tlim = [0.005 500];
+tfs.PTcond = 100;
+
+usestations = {'N01A' 'N12E-N01A' 'N23E-N01A'	'N58E-N01A' 'N02E-N01A'	'N13E-N01A'	'N24E-N01A'	'N59E-N01A' ...
+    'N03E-N01A'	'N14E-N01A'	'N25E-N01A'	'N60E-N01A' 'N05E-N01A'	'N16E-N01A'	'N51E-N01A'	'N61E-N01A' ...
+    'N06E-N01A'	'N18E-N01A'	'N52E-N01A'	'N62E-N01A' 'N07E-N01A'	'N19E-N01A'	'N54E-N01A' ...
+    'N08E-N01A'	'N20E-N01A'	'N55E-N01A' 'N09E-N01A' 'N21E-N01A'	'N56E-N01A' 'N10E-N01A'	'N22E-N01A'	'N57E-N01A'};
+tfs.usestations = usestations;
+%tfs.usestations = {'all'};
+tfs.rotangle = -30;
+plot_sounding(tfs,'N21E-N01A','rhoaphs');
+plot_section(tfs,'PT');
+plot_section(tfs,'phsxy');
+plot_rose(tfs,'PT');
+%%
+fname = 'test.dat';
+write_ModEM(tfs,fname);

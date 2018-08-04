@@ -1,0 +1,44 @@
+p           = '/Users/mbeck_07/sciebo/lehre/2015_AFC';
+datapath    = {'edi_files'};
+%usestations = {'all'};
+latlim      = [69 71];
+lonlim      = [25 26];
+utmzone     = '35';
+hemisphere  = 'N';
+porigin     = [25.4270190093667  69.5447589922697];
+porient     = 90;
+%
+tfs         = TFs;
+tfs.datapath= datapath;
+tfs.latlim  = latlim;
+tfs.lonlim  = lonlim;
+tfs.utmzone = utmzone;
+tfs.hemisphere=hemisphere;
+tfs.porigin = porigin;
+tfs.porient = porient;
+
+tfs         = TFs(tfs,p);
+%%
+tfs.ylim = [-1 17];
+usestations = {'N50S' 'N51E-N50S' 'N52E-N50S' 'N53S' 'N54E-N50S' 'N55E-N50S' ...
+    'N56E-N50S' 'N57E-N50S' 'N58E-N50S' 'N59E-N50S' 'N60E-N50S' 'N61E-N50S' 'N62E-N50S' ...
+    'N25E-N04S' 'N24E-N04S' 'N23E-N53S' 'N22E-N04S'  ...
+    'N01A' 'N02E-N01A'  'N03E-N01A'  'N05E-N01A'  'N04S'};
+usestations = {'N01A'	'N12E-N01A'	'N23E-N01A'	'N58E-N01A' ...
+'N02E-N01A'	'N13E-N01A'	'N24E-N01A'	'N59E-N01A' ...
+'N03E-N01A'	'N14E-N01A'	'N25E-N01A'	'N60E-N01A' ...
+'N05E-N01A'	'N16E-N01A'	'N51E-N01A'	'N61E-N01A' ...
+'N06E-N01A'	'N18E-N01A'	'N52E-N01A'	'N62E-N01A' ...
+'N07E-N01A'	'N19E-N01A'	'N54E-N01A'	'S06E-N01A' ...
+'N08E-N01A'	'N20E-N01A'	'N55E-N01A' ...
+'N09E-N01A' 'N21E-N01A'	'N56E-N01A' ...
+'N10E-N01A'	'N22E-N01A'	'N57E-N01A'};
+tfs.usestations = usestations;
+%tfs.usestations = {'all'};
+
+plot_section(tfs,'PhsYX');
+%plot_RPsection(tfs);
+plot_sounding(tfs,'N01A','RhoaPhs');
+%%
+fname = 'test.dat';
+write_ModEM(tfs,fname);

@@ -1,0 +1,86 @@
+p           = '/syn06/d_harp01/MasterThesis/case_2000line/2d_inversion/';
+datapath    = {'EDIs_N2000_masked'};
+latlim      = [42 52];
+lonlim      = [93 105];
+%utmzone     = '48';
+utmzone     = '47U';
+hemisphere  = 'N';
+porigin     = [ 47.968213  101.428076]; %2115T point
+% porigin     = [ 49.713070  101.998926]; %2920T point
+%porigin     = [ 44.374541  100.401661]; 2000 south point
+porient     = 15; % rel. to north 
+% porient     = 195; % rel. to north
+%
+disp('loading....')
+tfs         = TFs;
+tfs.datapath= datapath;
+tfs.latlim  = latlim;
+tfs.lonlim  = lonlim;
+tfs.utmzone = utmzone;
+tfs.hemisphere=hemisphere;
+tfs.porigin = porigin;
+tfs.porient = porient;
+
+tfs         = TFs(tfs,p);   % import all sites
+tfs.ylim    = [-15 250];
+tfs.Tlim    = [0.005 10000];
+tfs.Rlim    = [1 10000];
+tfs.Mlim    = [.1 10];
+tfs.Plim    = [0 90];
+tfs.PTpsilim= [-20 20]; % color range for psi coloring of phase tensor
+tfs.PTcond   = 50;
+tfs.rotangle = 105; % elestrike
+tfs.dotscale = 2;
+
+%%
+h = plot_section(tfs,'Phsxy');
+xlabel('distance [km]','Fontsize',14)
+ylabel('log_{10} periods [s]','Fontsize',14)
+xlim([-15 215])
+set(gca,'Fontsize',13)
+h = plot_section(tfs,'Phsyx');
+xlabel('distance [km]','Fontsize',14)
+ylabel('log_{10} periods [s]','Fontsize',14)
+set(gca,'Fontsize',13)
+xlim([-15 215])
+disp('plotting done.')
+%%
+tfs.frange = [0.00001 150];
+
+te_ef_phase_angle = 1.4;
+te_ef_appres_fraction = 1.0; %100 percent
+
+tm_ef_phase_angle = 1.4; % 5percent is 1.4 degrees
+tm_ef_appres_fraction = 0.1; %10 percent
+
+%tfs.floor           = {'te' 1.0+1i*1.4 'tm' .1+1i*1.4};     % error floors for rhoxy+1i*phsxy
+tfs.floor           = {'te' (te_ef_appres_fraction)+1i*(te_ef_phase_angle) 'tm' (tm_ef_appres_fraction)+1i*(tm_ef_phase_angle)};     % error floors for rhoxy+1i*phsxy
+
+tfs.usestations = {'all'};
+write_mare2dem(tfs,'20_Nline2000.emdata');
+disp('writing data file done.')
+%%
+disp('plotting....')
+h = plot_section(tfs,'Tellipse');
+h = plot_section(tfs,'Tellipse','rhoxy');
+h = plot_section(tfs,'Tellipse','rhoyx');
+h = plot_section(tfs,'PTellipse');
+tfs.rotangle = 0;
+h = plot_rose(tfs,'PT');
+h = plot_rose(tfs,'PT');
+disp('finished.')
+%%
+h = plot_section(tfs,'Rhoxy');
+xlabel('distance [km]','Fontsize',14)
+ylabel('log_{10} periods [s]','Fontsize',14)
+xlim([-15 215])
+set(gca,'Fontsize',13)
+h = plot_section(tfs,'Rhoyx');
+xlabel('distance [km]','Fontsize',14)
+ylabel('log_{10} periods [s]','Fontsize',14)
+set(gca,'Fontsize',13)
+xlim([-15 215])
+disp('plotting done.')
+
+
+

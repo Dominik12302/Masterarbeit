@@ -1,0 +1,391 @@
+function [xtr_freq, tot_time, n] = sort_spam4(station_folder,plotit,linkit,varargin)
+
+% search Spam4 folder and sort files into a new directory hierarchy as
+% required by emts
+%
+% sort_spam(station_folder, plotit, linkit)
+% sort_spam(station_folder, plotit, linkit,'raw_path',...,'propath',...)
+%
+% - read station from
+%   fullfile(raw_path, station_folder)
+% where station_folder and raw_path are described below.
+%
+% - then make directories and link (unix) or copy (pc) files to
+%	propath/SITENAME/ts/adc/spam4/runFFFFHz_X
+% (for more than one frequency) or 
+%	propath/SITENAME/ts/adc/spam4/runX
+% (for a single frequency)
+% SITENAME is the name of the station folder
+% runX is the Xth run at that frequency
+%
+% identified as continuous (as is determined from headers)
+%
+% station_folder: (relative) folder name for data of a station, or cell
+%                 of multiple stations.            ,
+%           if station_folder is empty, search all rawpath for folders
+%           (see below)
+%
+% linkit (default: false) print operations to be done, but do not link/copy!
+%          true: actally carry out symbolic linking (linux, mac) or copying (pc).
+%
+% forcecopy (default: false) force physical copy even on linux systems
+%
+% plotit (default: false) shows the detected continuous runs in a
+%           runtime plot
+%
+% 'raw_path_mode',1/2, 1 default, see below
+% 'raw_path' optional base path for SPAM4 raw data. Is applied as
+%       propath/SITENAME/raw_path/... ('raw_path_mode', 1)
+%       OR
+%       raw_path/SITENAME/...         ('raw_path_mode', 2)
+% 
+%
+%
+% 'samplerate' (default: [], means all frequencies found. 
+%                   use XXXX as named above
+%                   same for array with more than one frequency
+%      
+%               if array with specific frequency is given, XXXX is omitted
+%               if 0 is given, any single frequency will be selected or
+%               from several, the highest value found.
+%
+% JK 2015, changed 2017
+
+raw_path = 'RAW';
+propath = get_info(varargin,'propath','D:\DATA_files\DATA\Hangai_2016_testing');
+calpath = get_info(varargin,'calpath','D:\DATA_files\DATA\CALDATA');
+raw_path_mode = get_info(varargin,'raw_path_mode',1);
+
+if nargin < 1;  station_folder = []; end
+if isempty(station_folder); error('tell me the station name!'); end
+if nargin < 2; plotit = false; end
+if nargin < 3; linkit = false; end
+n = get_info(varargin,'n',0);
+if iscell(station_folder);
+    for ind = 1 : numel(station_folder);
+        [xtr_freq, tmp, n] = sort_spam4(station_folder{ind},plotit,linkit,'n',n,varargin{:});
+        if exist('tot_time','var');
+            tot_time(end+1) = tmp;
+        else
+            tot_time(1) = tmp;
+        end
+    end
+    return
+end
+
+[raw_path, propath] = get_info(varargin,'raw_path',raw_path,'propath',propath);
+
+forcecopy = get_info(varargin,'forcecopy',false);
+
+meas_dirs = dir([propath,filesep,station_folder,filesep,raw_path,filesep,'20*']);
+
+all_xtr = [];
+all_xtrx = [];
+all_raw = [];
+all_tmp = [];
+
+for ind = 1 : numel(meas_dirs)
+    
+    % RAW files
+    rawfiles = dir([propath,filesep,station_folder,filesep,raw_path,filesep,meas_dirs(ind).name,filesep,'*.RAW']);
+    
+    % TMP files
+    tmpfiles = dir([propath,filesep,station_folder,filesep,raw_path,filesep,meas_dirs(ind).name,filesep,'*.TMP']);
+    
+    % XTR files
+    xtrfiles = dir([propath,filesep,station_folder,filesep,raw_path,filesep,meas_dirs(ind).name,filesep,'*.XTR']);
+    
+    % XTRX files
+    xtrxfiles = dir([propath,filesep,station_folder,filesep,raw_path,filesep,meas_dirs(ind).name,filesep,'*.XTRX']);
+    
+    % are there xtrx files but no xtr files?
+    if isempty(xtrfiles) && ~isempty(xtrxfiles)
+        
+        if ispc % on windows
+            do_conversion = true;
+        elseif ~ispc % on linux
+            do_conversion = false;
+            % check if there is wine
+            [status, message] = system('which wine');
+            if status ~= 0;
+                disp('cannot find wine');
+            else
+                do_conversion = true;
+            end
+        else
+            do_conversion = false;
+        end
+        
+        if do_conversion
+            % check if file xtrx2xtr.exe is there...
+            if exist(fullfile(calpath,'xtrx2xtr.exe')) == 2
+                xtrx2xtr_file = fullfile(calpath,'xtrx2xtr.exe');
+            elseif exist(['.',filesep,'xtrx2xtr.exe']) == 2
+                xtrx2xtr_file = ['.',filesep,'xtrx2xtr.exe'];
+            else
+                xtrx2xtr_file = [];
+            end
+            
+            if ~isempty(xtrx2xtr_file)
+                disp(['xtrx2xtr.exe located at ',xtrx2xtr_file]);
+                
+                % run command
+                if ispc
+                    command_xtrx2xtr = [xtrx2xtr_file,' -c',calpath,' ',fullfile([propath,filesep,station_folder,filesep,raw_path,filesep,meas_dirs(ind).name],'*.XTRX')];
+                    [status, result] = system(command_xtrx2xtr);
+                else
+                    % bad workaround:
+                    rawpath_old = add_backspaces(fullfile([propath,filesep,station_folder,filesep,raw_path]));
+                    calpath_old = add_backspaces(calpath);
+                    rawpath_new = ['./tmp_raw_path'];
+                    calpath_new = ['./tmp_cal_path'];
+                    system(['ln -s ',rawpath_old,' ',rawpath_new]);
+                    system(['ln -s ',calpath_old,' ',calpath_new]);
+                    command_xtrx2xtr = ['wine ',xtrx2xtr_file,' -c',calpath_new,' ',fullfile([rawpath_new,filesep,meas_dirs(ind).name],'*.XTRX')]
+                    [status, result] = system(command_xtrx2xtr);
+                    system(['rm -f ',rawpath_new]);
+                    system(['rm -f ',calpath_new]);
+                    % command_xtrx2xtr = ['wine "',xtrx2xtr_file,'" "-c',calpath,'" "',fullfile([propath,filesep,station_folder,filesep,raw_path,filesep,meas_dirs(ind).name],'*.XTRX'),'"']
+                end
+                
+                disp(result);
+                if status ~= 0
+                    warning(['Problem with conversion to XTR in ',meas_dirs(ind).name]);
+                    pause(1);
+                end
+                
+                % scan again XTR files
+                xtrfiles = dir([propath,filesep,station_folder,filesep,raw_path,filesep,meas_dirs(ind).name,filesep,'*.XTR']);
+                
+            else
+                warning(['** Cannot find ',fullfile(calpath,'xtrx2xtr.exe'),' or ',['.',filesep,'xtrx2xtr.exe'],' !!! **']);
+                error('** XTRX files need to be converted to XTR first! **');
+            end
+        else
+            error('** XTRX files need to be converted to XTR first! **');
+        end
+        
+    end
+    
+    % add dirname
+    for ind2 = 1 : numel(xtrfiles)
+        xtrfiles(ind2).base_dir = [propath,filesep,station_folder,filesep,raw_path,filesep,meas_dirs(ind).name];
+    end
+    
+    all_xtr = [all_xtr; xtrfiles];
+    all_xtrx = [all_xtrx; xtrxfiles];
+    all_raw = [all_raw; rawfiles];
+    all_tmp = [all_tmp; tmpfiles];
+end
+
+if ~isempty(all_tmp)
+    msg = ['WARNING!!: found ',num2str(numel(all_tmp)),' TMP-files !!!'];
+    disp('!!!!!!!!!!!!!!')
+    disp(msg);
+    disp('!!!!!!!!!!!!!!')
+    msgbox(msg);
+end
+if numel(all_xtr) ~= numel(all_xtrx)
+    msg = ['WARNING!!: found ',num2str(numel(all_xtr)),' XTR-files but ',num2str(numel(all_xtrx)),' XTRX-files !!!'];
+    disp('!!!!!!!!!!!!!!')
+    disp(msg);
+    disp('!!!!!!!!!!!!!!')
+    msgbox(msg);
+end
+if numel(all_xtr) ~= numel(all_raw)
+    msg = ['WARNING!!: found ',num2str(numel(all_xtr)),' XTR-files but ',num2str(numel(all_raw)),' RAW-files !!!'];
+    disp('!!!!!!!!!!!!!!')
+    disp(msg);
+    disp('!!!!!!!!!!!!!!')
+    msgbox(msg);
+end
+if numel(all_raw) ~= numel(all_xtrx)
+    msg = ['WARNING!!: found ',num2str(numel(all_raw)),' RAW-files but ',num2str(numel(all_xtrx)),' XTRX-files !!!'];
+    disp('!!!!!!!!!!!!!!')
+    disp(msg);
+    disp('!!!!!!!!!!!!!!')
+    msgbox(msg);
+end
+
+start = zeros(1,numel(all_xtr));
+for ind = 1 : numel(all_xtr)
+    fid = fopen([all_xtr(ind).base_dir,filesep,all_xtr(ind).name],'r');
+    C = textscan(fid,'%s'); C = C{1};
+    fclose(fid);
+    [tf, which_name] = cell_contains(C, '[FILE]');
+    C(1:which_name) = [];
+    [tf, which_name] = cell_contains(C, '''NAME=''');
+    which_freq = which_name + 4;
+    f = abs(str2double(C{which_freq})).^(-sign(str2double(C{which_freq})));
+    all_xtr(ind).freq = f;
+    [tf, which_name] = cell_contains(C, '''DATE=''');
+    which_start = which_name + 1;
+    which_start_ms = which_name + 2;
+    which_stop = which_name + 3;
+    which_stop_ms = which_name + 4;
+    all_xtr(ind).start = str2double(C{which_start});
+    all_xtr(ind).startms = str2double(C{which_start_ms});
+    all_xtr(ind).finish = str2double(C{which_stop});
+    all_xtr(ind).finishms = str2double(C{which_stop_ms});
+    start(ind) = all_xtr(ind).start;
+    all_xtr(ind).run = [];
+end
+idx = sortrows([start(:), (1:numel(start))']);
+all_xtr = all_xtr(idx(:,2));
+
+freq = zeros(1,numel(all_xtr));
+for ind = 1 : numel(all_xtr)
+    freq(ind) = all_xtr(ind).freq;
+end
+
+srate = get_info(varargin,'samplerate',[]);
+ufreq = unique(freq);
+do_many_frequencies = true;
+if ~isempty(srate)
+    if srate == 0
+        % take highest
+        ufreq = max(ufreq); 
+        do_many_frequencies = false;
+    elseif numel(srate) == 1
+        ufreq(ufreq~=srate) =  [];        
+        do_many_frequencies = false;
+    else    
+        got_ufreq = false(size(ufreq));
+        for ind = 1 : numel(srate)
+            got_ufreq = got_ufreq | ufreq == srate(ind);
+        end
+        ufreq(~got_ufreq) = [];
+    end
+end
+if isempty(ufreq); disp('No data at ',num2str(ufreq),' Hz'); return; end
+
+for ind = 1 : numel(ufreq);    
+    xtr_freq{ind} = all_xtr(freq == ufreq(ind));
+end
+
+for ind = 1 : numel(xtr_freq)
+    run = 1;
+    stru = xtr_freq{ind};
+    for ind2 = 1 : numel(stru)
+        if ind2 > 1
+            if abs( ufreq(ind).*((stru(ind2).start - stru(ind2-1).finish) + 1e-6*(stru(ind2).startms - stru(ind2-1).finishms) )  - 1 ) > 0.5
+                % disp( ufreq(ind).*(stru(ind2).start - stru(ind2-1).finish) + (ufreq(ind)*1e-6)*(stru(ind2).startms - stru(ind2-1).finishms) - 1 );
+                run = run + 1;
+            end
+        end
+        stru(ind2).run = run;
+    end
+    xtr_freq{ind} = stru;
+end
+
+nold = n; mint = Inf; maxt = -Inf;
+for ind = 1 : numel(xtr_freq)
+    f = xtr_freq{ind}(1).freq;
+    stru = xtr_freq{ind};
+    
+    tot_time.name = station_folder;
+    tot_time.f = f;
+    tot_time.start = xtr_freq{1}(1).start;
+    tot_time.stop = xtr_freq{1}(end).finish;
+    
+    runs = zeros(1,numel(stru));
+    for ind2 = 1 : numel(stru)
+        runs(ind2) = stru(ind2).run;
+    end
+    uruns = unique(runs);
+    
+    for ind2 = 1 : numel(uruns)
+        n = n + 1;        
+        first = find(runs == uruns(ind2),1,'first');
+        last = find(runs == uruns(ind2),1,'last');
+        s1 = stru(first).start; s1ms = stru(first).startms;
+        s2 = stru(last).finish; s2ms = stru(last).finishms;
+        if s2 == 0;
+            tmp = dir([xtr_freq{ind}(last-1).base_dir,filesep,xtr_freq{ind}(last-1).name(1:end-3),'RAW']); Nsmp = (tmp.bytes - 200)/5;
+            s2 = s1 + Nsmp/xtr_freq{ind}(last-1).freq;
+            s2ms = round((s2 - floor(s2))*1e6);
+            s2 = floor(s2);
+        end
+        [start, startms] = unixtime2MTtime(s1,s1ms);
+        [finish, finishms] = unixtime2MTtime(s2,s2ms);
+        disp([station_folder,' - ',num2str(f),' Hz: run ',num2str(uruns(ind2)),' start: ',datestr(start),' ',num2str(startms),' ms, stop: ',datestr(finish),' ',num2str(finishms),' ms.']);
+        if plotit
+            t1 = datenum(start)  + startms/86400/1000; t2 = datenum(finish) + finishms/86400/1000;
+            if t1<mint; mint = t1; end
+            if t2>maxt; maxt = t2; end
+            patch([t1, t2, t2, t1, t1],[n n n+1 n+1 n]-1/2, f);
+            hold on;
+            set(gca,'xticklabel',datestr(get(gca,'xtick')'));
+        end
+        
+        % old target dir structures:
+        % % propath\2300B\PROC_50\ts\adc\spam4
+        % target_path = [propath,filesep,station_folder,filesep,proc_path,'_',num2str(xtr_freq{ind}(first).freq),filesep,'ts',filesep,'adc',filesep,'spam4',filesep,'run',num2str(uruns(ind2))];
+        % % propath\2300B\ts\adc\spam4\run1_50Hz
+        % target_path = [propath,filesep,station_folder,filesep,'ts',filesep,'adc',filesep,'spam4',filesep,'run',num2str(uruns(ind2)),'_',num2str(xtr_freq{ind}(first).freq),'Hz'];
+        
+        % current target dir structure
+        % % propath\2300B\ts\adc\spam4\run50Hz_1
+        if do_many_frequencies
+            % % propath\2300B\ts\adc\spam4\run50Hz_1
+            target_path = [propath,filesep,station_folder,filesep,'ts',filesep,'adc',filesep,'spam4',filesep,'run',num2str(xtr_freq{ind}(first).freq),'Hz_',num2str(uruns(ind2))];
+        else
+            % % propath\2300B\ts\adc\spam4\run1
+            target_path = [propath,filesep,station_folder,filesep,'ts',filesep,'adc',filesep,'spam4',filesep,'run',num2str(uruns(ind2))];
+        end        
+        
+        for ind3 = first:last
+            xtr_file_name = [xtr_freq{ind}(ind3).base_dir,filesep,xtr_freq{ind}(ind3).name];
+            raw_file_name = [xtr_freq{ind}(ind3).base_dir,filesep,xtr_freq{ind}(ind3).name(1:end-3),'RAW'];
+            xtr_target_name = [target_path,filesep,xtr_freq{ind}(ind3).name];
+            raw_target_name = [target_path,filesep,xtr_freq{ind}(ind3).name(1:end-3),'RAW'];
+            if linkit
+                if ~exist(target_path,'dir'); make_dir_tree(target_path); end
+                if ~ispc && ~forcecopy
+                    system(['ln -fs ',add_backspaces(xtr_file_name),' ',add_backspaces(xtr_target_name)]);
+                    system(['ln -fs ',add_backspaces(raw_file_name),' ',add_backspaces(raw_target_name)]);
+                else
+                    if exist(add_backspaces(xtr_target_name)) ~= 2
+                        copyfile(add_backspaces(xtr_file_name),add_backspaces(xtr_target_name));
+                        disp([xtr_file_name,' -> ',xtr_target_name]);
+                    end
+                    if exist(add_backspaces(raw_target_name)) ~= 2
+                        copyfile(add_backspaces(raw_file_name),add_backspaces(raw_target_name));
+                        disp([raw_file_name,' -> ',raw_target_name]);
+                    end
+                end
+            else
+                disp([xtr_file_name,' -> ',xtr_target_name]);
+                disp([raw_file_name,' -> ',raw_target_name]);
+            end
+            
+        end
+        
+    end
+end
+if plotit
+    hold on;
+    dt = (maxt-mint).*1e-3;
+    dn = (nold - n).*1e-3;
+    plot([mint-dt maxt+dt maxt+dt mint-dt  mint-dt],[nold+1/2-dn nold+1/2-dn n+1/2+dn n+1/2+dn nold+1/2-dn],'r-');
+    %         text( (mint + maxt - 100*dt)/2 , (nold + n + 1 - 100*dn)/2,station_folder,'fontsize',16,'color','r');
+    text( mint - 1, (nold + n + 1 - 100*dn)/2,station_folder,'fontsize',16,'color','r');
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

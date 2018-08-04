@@ -1,0 +1,4 @@
+- call of EMSpectra/private/default_decimation.m ??
+- sp_writeafc2: EDE introduced a switch to distinguish E- and H- EDE; added 
+calibration entries for very long periods to avoid extrapolation error
+- I think the dating conversion allows aonly for input voltages of 1 V maximum; there may be cases where these values are exceeded. perhaps adopt in spam4read and dating. (change factor 2^32 to 2^30 or so?? 

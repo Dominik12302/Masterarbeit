@@ -1,0 +1,53 @@
+%% Load MT spectra data, calculate mahalanobis distance and plot 97.5 % 
+% quantile of chi2 distribution as ellipse
+
+clear all
+
+
+% %% real data from 6300B -> Bx, By and 6320T -> Ex (fourier-coefficients, dec. 1)
+load('E_Ex.mat')
+load('B_X.mat')
+a = real(X(1:10000,2)); % By field
+b = real(Y(1:10000,1)); % Ex field
+
+mean_ab = mean([a b]);
+cov_ab = cov([a b]);
+alpha = sqrt(chi2inv(0.975,2)); % alpha quantile chi2 dist, 97.5 % of data
+
+
+
+p = d < alpha;
+a_p = real(a(p));
+b_p = real(b(p));
+
+% plot data points and confidence ellipse
+figure
+plot(real(a),real(b),'.')
+hold on
+
+% calculate eigenvalues/-vectors for ellipse plot
+[V,D] = eig(cov_ab);
+[~,I] = max(D(:));
+[i,~] = ind2sub(size(D),I); % index of largest eigenvektor
+if i == 1 % index of smallest eigenvalue
+    j = 2;
+else 
+    j = 1;
+end
+
+% define ellipse properties
+ax_a = alpha*sqrt(max(D(:))); % main axis a
+ax_b = alpha*sqrt(D(j,j)); % minor axis b
+angle = atan(V(2,i)/V(1,i)); % angle for ellipse
+if(angle < 0) % move to 0 to 2*pi
+    angle = angle + 2*pi;
+end
+
+grid_ellipse = linspace(0,2*pi);
+ellipse_a  = ax_a*cos(grid_ellipse);
+ellipse_b  = ax_b*sin(grid_ellipse);
+R = [cos(angle) sin(angle); -sin(angle) cos(angle)]; % rotate ellipse
+ellipse = [ellipse_a;ellipse_b]'*R; 
+plot(ellipse(:,1)+mean_ab(1),ellipse(:,2)+mean_ab(2))
+
+

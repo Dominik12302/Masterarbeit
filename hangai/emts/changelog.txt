@@ -1,0 +1,73 @@
+Notes JK 04.06.2017
+
+I have integrated EMApp.m as I got it from MJC (2016 version) and MB (2017, minor modifications made on field course) with my own changes here. I eliminated some small bugs, resulting in a bit more stability.
+
+The most important changes are summarized as follows:
+
+
+INI-FILES
+
+- Change ini-file fomat !!!:
+propath
+reftime
+calpath
+
+for example
+
+D:\DATA_files\DATA\Hangai_2016_testing
+
+2016 07 08 00 00 00
+
+D:\DATA_files\DATA\CALDATA
+
+
+- EMApp now looks for a file "default.ini" located in the same location as EMApp.m or EMApp.exe.
+
+
+FOLDER STRUCTURE
+
+- If data folders are found to be in: propath/SITE/RAW/... there is an option to generate a copy of those files in the structure required by the processing code. This operations will not be performed if the files are already found present, but of course, checking this might take a little time, which is why there is a CHECKBOX: "organise files..." in the IMPORT section to toggle this on/off.
+
+EDE systems: Folders found in propath/SITE/RAW/... are assumed to represent continuous runs. Each folder found will be copied to propath/SITE/ts/adc/EDE/...  
+
+SPAM4 systems: Folders found in propath/SITE/RAW/... are assumed not assumed to represent runs (they usually are measurement days). First, each folder is checked for the presence of XTRX and XTR files. If the former exist and the latter not, the gui tries to call xtrx2xtr.exe on the XTRX files to produce XTR files in the RAW directory. For this, xtrx2xtr.exe must be found either in the path of EMApp or in the calibration file directory. Second, the XTR-files in all folders are analysed to determine which are the continuous runs for each detected sampling rate. Third, these runs are sorted into propath/SITE/ts/adc/spam4/runXXHz_Y, where XX is the sampling rate and Y is the index of the run. 
+NOTE: The resulting structure requires that upon import, a folder filter is applied as, e.g., ./ts/adc/spam4/run50Hz* to ensure that other sampling rates are ignored. Therefore, i changed the default folder filters!
+NOTE2: Two ways to only import a certain run: either change the filter and rename some run folder, or e.g. append a random letter (e.g. an x) at the beginning of folders to be ignored.
+
+
+CALIBRATION
+
+- Calibration files for the EDE electric channels must be be provided as EDI-files in the calibration files directory. The naming convention is EDEXXX.edi, where XXX is the 3-digit EDE serial number. These EDI files will be read at the same time when coil calibration files are read. 
+The transfer function used for both channels is the mean of the Zxx and Zyy component. The extrapolation value used for lower and higher periods than those contained is 1. 
+The idea is that these EDI's are generated from processing data collected in a parallel test.
+- GFZ-XML format now supported.
+- Theoretical transfer functions for MFS10 and MFS11 added.
+
+
+USER INTERFACE
+
+Import tab:
+- Additional button "same as above but skip writing Proc", which does the same as "Import & Resample & FFT" but performs resampling and FFT without writing ATS files in Proc directory. This may be slightly faster if only spectra are to be produced fast, but most obviously it breaks some UI functionality expecting the existance of ATS files at the correct frequency (like maybe showing runtimes/plotting times series etc.), so do not use unless you really only want to get the spectra as quickly as possible.
+- Additional checkbox  "Organise files ...", see FOLDER STRUCTURE above.
+
+Time series tab:
+- If not previously manually changed, the contents of boxes "usetime from" and "usetime to" are automatically adapted to minimum and maximum time of the imported time series, whenever new time series are imported. This tab can now also be used to limit time interval for processing.
+
+TF tab:
+- Additional checkbox: "Time interval ...", which if checked restricts the time range used in the processing to the one shown here, which is identical to the time range in the Time series tab (see above). 
+
+
+---------------------------------------------------
+Technical description and more internal changes:
+
+Replaced underlying EMTS code: merged newest version I got from MB (likely last changes Sept. 2016 with my own version (last changes early 2017). Then I introduced more modifications
+
+- Both versions contain some minor or major bug-fixes.
+- Introduced methods EMTimeSeries.remove_site and EMProc.remove_site, which allow to delete a site from an existing object. (Improves stability of EMApp by having it remove any pre-existing site with the same name when importing another site, so that no doubles can occur)
+- changed EMProc.sites to be a dependent property (as in EMTimeSeries)
+- sp_writeafc2.m is the last stable version from MB + shftmethod 'fft' as an option additional to 'spectrogram'
+- sp_writeafc2.m does no longer contain the extra calibration for the EDE electric channels. Instead, these are to be provided as EDI-files (holding the transfer function as Zxx and Zyy, their mean will be used on both channels of the EDE, extrapolation value used for lower and higher periods than those contained is 1) in the calibration file directory. The naming convention is EDEXXX.edi, where XXX is the 3-digit EDE serial number. These EDI files will be read at the same time when coil calibration files are read. The idea is that these EDI's are generated from processing data collected in a parallel test.
+- sp_readcaldata.m: Added support for GFZ XML calibration file format.
+- sp_readcaldata.m: Added support and theoretical TF for MFS10 and MFS11 coils.
+- EMSpectra holds now 11 decades in the decimation scheme (for 50 Hz original sampling rate, the largest sampling rate corresponds then to a period ca. 650 seconds.
+- I also made additional changes (to allow for a 5-based decimation scheme, for usetime to respect milli-seconds for HF applications), but they are not in this version yet! 

@@ -1,0 +1,408 @@
+% compute spectrogramm and write to disc
+
+function obj = sp_writeafc2(obj,ts)
+
+obj.tssource = ts.source;
+obj.name     = ts.name;
+obj.run      = ts.run;
+obj.lat      = ts.lat;
+obj.lon      = ts.lon;
+obj.alt      = ts.alt;
+obj.Nch      = numel(ts.usech);
+obj.chnames  = ts.chnames(ts.usech);
+obj.chtypes  = ts.chnames(ts.usech);
+obj.sens_name= ts.sens_name(ts.usech);
+obj.sens_sn  = ts.sens_sn(ts.usech);
+
+if ~ts.resmpfreq , obj.srate = ts.srate;
+else obj.srate = ts.resmpfreq; end
+
+if obj.srate >= 1, srate = [num2str(round(obj.srate)) 'H'];
+else srate = [num2str(round(1./obj.srate)) 'S'];
+end
+
+utc = ts.utc;
+if ~isempty(utc)
+startvec = datevec(utc(1)); startvec(6) = round(startvec(6)); startvec = datevec(datenum(startvec));
+stopvec = datevec(utc(end)); stopvec(6) = round(stopvec(6)); stopvec = datevec(datenum(stopvec));
+timestr = [num2str(startvec(1),'%04d')  num2str(startvec(2),'%02d')  num2str(startvec(3),'%02d') '-' ...
+    num2str(startvec(4),'%02d') num2str(startvec(5),'%02d') num2str(startvec(6),'%02d') '_' ...
+    num2str(stopvec(1),'%04d')  num2str(stopvec(2),'%02d')  num2str(stopvec(3),'%02d') '-' ...
+    num2str(stopvec(4),'%02d') num2str(stopvec(5),'%02d') num2str(stopvec(6),'%02d')];
+else
+    timestr = [];
+end
+% outputfilename, make output directory if necessary and possible
+fname = [ts.systemSN '_' ts.system(1:3) '_R' obj.run '_T' [obj.chnames{ts.usech}] '_' srate ...
+    '_I' timestr '_Z' num2str(obj.reftime(1),'%04d')  num2str(obj.reftime(2),'%02d')  num2str(obj.reftime(3),'%02d') '-' ...
+    num2str(obj.reftime(4),'%02d') num2str(obj.reftime(5),'%02d') num2str(obj.reftime(6),'%02d') '.afc'];
+
+if isempty(obj.source{1})
+    obj.source = {fullfile(ts.source{1},fname)};
+    if obj.debuglevel == 1, disp([' - target directory is ' obj.source{1} ' ...']); end
+end
+if isdir(obj.source{1})
+    obj.source = {fullfile(obj.source{1},fname)};
+elseif mkdir(obj.source{1})
+    if obj.debuglevel == 2, disp([' - creating directory ' obj.source{1} ' ...']); end
+    obj.source = {fullfile(obj.source{1},fname)};
+else
+    disp(['** Error: Target directory ' obj.source ' does not exist']);
+    return;
+end
+
+%% make sure, we use the reftime defined in the EMspectra obj.
+ts.reftime  = obj.reftime;
+% extract the sample range of the data relative to
+% reftime; Note that we do not use all samples as
+% the default but only the samples given by ts.usesmpr
+% (corresponding to the time interval ts.usetime)
+
+smp1        = ts.rsmpr;
+if isempty(smp1); disp('**too few samples, skipping run!!**'); return; end
+
+smp2        = smp1(end); 
+smp1        = smp1(1);
+smprange    = [smp1 smp2];
+
+% calculate number of possible decimation levels
+% such that at least 10 windows remain at the
+% largest decimation level. Do this only roughly,
+% because I ignore the overlap between the windows,
+% and do not test how many windows really fit given
+% that we will have to cut off some samples when
+% using the global time axis
+
+Nsmp            = diff(smprange)+1;
+ind             = find(Nsmp./((obj.wlength-obj.noverlap).*cumprod(obj.decimate))>4);
+% MB 11.06.2016 assume the lesser of of Ndec and ind
+obj.Ndec        = min(obj.Ndec,numel(ind));
+
+obj.decimate    = obj.decimate(1:obj.Ndec);
+obj.wlength     = obj.wlength(1:obj.Ndec);
+obj.noverlap    = obj.noverlap(1:obj.Ndec);
+obj.prew        = obj.prew(1:obj.Ndec);
+% end of change
+
+% JK: if no decimation was possible at all, skip this run;
+if obj.Ndec == 0; disp('**too few samples, skipping run!!**'); return; end
+
+% ok, now we should be able to determine the actual
+% sample range being used for each decimation level. We do
+% this by considering the number of samples at the
+% original sampling rate, required to form windows
+% of length wlength at each decimation level at the
+% decimated sampling rate.
+
+% iwin+1 is the counter of the first window to
+% use relative to reftime
+win1      = ceil((smprange(1)-1)./((obj.wlength-obj.noverlap).*cumprod(obj.decimate)));
+% ismp+1 is the first sample to use relative to reftime
+smp1      = win1.*((obj.wlength-obj.noverlap).*cumprod(obj.decimate));
+% win2+1 is the last window to use, relative to
+% reftime
+win2      = floor((smprange(2)-obj.wlength.*cumprod(obj.decimate))./((obj.wlength-obj.noverlap).*cumprod(obj.decimate)));
+% smp2 is the last sample to use, relative to reftime
+smp2      = win2.*((obj.wlength-obj.noverlap).*cumprod(obj.decimate))+obj.wlength.*cumprod(obj.decimate);
+% now we know that we have to read samples
+% [smp1+1:smp2] relative to reftime, if the data were resampled. This
+% corresponds to a different set of samples of the
+% original data. So, we must recalculate the usesmp
+% property of the time series object
+% we will have a problem, if the first window does
+% not start at a full second, and if the last
+% window does not end at a full second
+
+for idec = 1:obj.Ndec
+    usetime   = [obj.reftime obj.reftime];
+    usetime(6)  = usetime(6)+smp1(idec)/obj.srate;
+    usetime(12) = usetime(12)+ceil(smp2(idec)/obj.srate);
+    usetimedec(idec,:)= [datevec(datenum(usetime(1:6))) datevec(datenum(usetime(7:12)))];
+    usesmpdec(idec,:) = get_usesmp(ts,usetimedec(idec,:));
+    if idec > 1
+        if usesmpdec(idec,1) < usesmpdec(idec-1,1) % go one window further
+            usesmpdec(idec,1) = usesmpdec(idec,1)+(obj.wlength(idec)-obj.noverlap(idec))*prod(obj.decimate(1:idec));
+            % MB 12.06.2016 Bug fix: changed this from 
+            % win1(idec) = win1(idec+1); to
+            win1(idec) = win1(idec)+1;
+        end
+    end
+end
+obj.W = [win1+1; win2+1]';
+
+% before decimating, we have to skip this ampount
+% of samples
+% smpskip   = diff(usesmpdec(:,1))./cumprod(obj.decimate(1:end-1))';
+
+% JK: I believe that we should use ts.usesmpr(1) to go for where the
+% resampled time series starts, and modify the skip also by
+% ts.srate/obj.srate to make it fit to the resampled data:
+% OLD VERSION
+% smpskip   = (usesmpdec(:,1)-ts.usesmp(1));
+% if obj.Ndec > 1
+%     smpskip(2:end) = diff(smpskip)./cumprod(obj.decimate(1:end-1))';
+% end
+% MODIFIED VERSION
+% Comment MB: that should be the same!!
+smpskip   = (usesmpdec(:,1)-ts.usesmpr(1))/ts.srate*obj.srate;
+if obj.Ndec > 1
+    smpskip(2:end) = diff(smpskip)./cumprod(obj.decimate(1:end-1))';
+end
+
+% ts.usesmp = [usesmpdec(1,1)  max(usesmpdec(:,2))];
+usech     = ts.usech;
+if obj.debuglevel == 1, disp([' - creating spectra file ' obj.source{1} ' ...']); end
+% write general header
+fid = fopen(obj.source{1},'w+');
+fwrite(fid,zeros(1,obj.global_headerlength),'int8');
+fseek(fid,0,'bof');
+fwrite(fid,obj.global_headerlength,'int16');
+fwrite(fid,obj.channel_headerlength,'int16');
+Ns = numel(obj.name);
+fwrite(fid,Ns,'int16');
+fwrite(fid,obj.name,'char*1');
+Ns = numel(obj.run);
+fwrite(fid,Ns,'int16');
+fwrite(fid,obj.run,'char*1');
+fwrite(fid,obj.lat,'float32');
+fwrite(fid,obj.lon,'float32');
+fwrite(fid,obj.alt,'float32');
+fwrite(fid,obj.Nch,'int16');
+
+% JK: HERE WE DO A DIRTY TRICK!
+% int32 have range of [-2^31, 2^31-1]
+% thus the negative range is used here to store fractional
+% sampling rates
+%
+% see: help code_double_as_neg_int
+% and  help code_double_as_neg_int_inverse
+%
+% original
+% fwrite(fid,obj.srate,'int32');
+% modified version
+fwrite(fid,code_double_as_neg_int(obj.srate,[],32),'int32');
+
+
+%fwrite(fid,datenum(obj.reftime),'float32'); % reference time in datenum format, use datestr to convert
+fwrite(fid,obj.reftime,'int16'); % reference time in datenum format, use datestr to convert
+
+fwrite(fid,obj.Ndec,'int16'); % this is the entire layout
+fwrite(fid,obj.decimate,'int16');
+fwrite(fid,obj.wlength,'int16');
+fwrite(fid,obj.noverlap,'int16');
+fwrite(fid,obj.prew,'int16');
+fwrite(fid,obj.window(1:4),'char*1');
+fwrite(fid,obj.Nk,'int16');
+fwrite(fid,obj.timebandwidth,'int16');
+Ns = numel(obj.tssource{1});
+fwrite(fid,Ns,'int16');
+fwrite(fid,obj.tssource{1},'char*1');
+header_pos = ftell(fid);
+Nfc = 0;
+for ich = 1:numel(usech)
+    if obj.debuglevel == 1, disp([' + Channel ' obj.chnames{ich}]); end
+    fseek(fid,obj.global_headerlength+(ich-1)*obj.channel_headerlength+(ich-1)*(Nfc*8+Nfc/obj.Nk),'bof');
+    fwrite(fid,zeros(1,obj.channel_headerlength),'int8');
+    fseek(fid,obj.global_headerlength+(ich-1)*obj.channel_headerlength+(ich-1)*(Nfc*8+Nfc/obj.Nk),'bof');
+    % write channel infos
+    fwrite(fid,obj.chnames{ich}(1:2),'char*1');
+    fwrite(fid,obj.chtypes{ich}(1:2),'char*1');
+    % write additional staff here like calibration
+    % data etc.
+    % ...
+    fseek(fid,obj.global_headerlength+ich*obj.channel_headerlength+(ich-1)*(Nfc*8+Nfc/obj.Nk),'bof');
+    ts.usech = usech(ich);
+    data = ts.dataphys; % these data are in V/m (e-fields) or in mV/nT (induction coils)
+    if strcmp(ts.chnames(usech(ich)),'Ex') || strcmp(ts.chnames(usech(ich)),'Ey')
+        data = data*1000; % convert in mV/km
+    end
+    f = 1;
+    for idec = 1:obj.Ndec   
+        data = data(smpskip(idec)+1:end);
+        if obj.decimate(idec)>1
+            if obj.sratedec(idec) >= 1, srd = [num2str(obj.sratedec(idec)) ' Hz']; 
+            else srd = [num2str(1./obj.sratedec(idec)) ' sec']; end
+            if obj.debuglevel == 1, 
+                if f, fprintf(1,' - decimating to '); f=0; end
+                fprintf(1,[srd ' | ' ]); 
+                if idec == obj.Ndec, fprintf(1,'\b\b\n'); end; 
+            end
+            data = decimate(data,obj.decimate(idec),300,'fir'); %#ok<*CPROP>
+        end
+        switch obj.window
+            case 'hamming'
+                wnd = hamming(obj.wlength(idec),'periodic');
+            case 'hanning'
+                wnd = hann(obj.wlength(idec),'periodic');
+            case 'parzenwin'
+                wnd = parzenwin(obj.wlength(idec));
+            case 'dpss'
+                wnd = dpss(obj.wlength(idec),obj.timebandwidth,obj.Nk);
+            case 'rectangular'
+                wnd = ones([obj.wlength(idec), 1]);
+        end
+        shftmethod = 'spectrogram';
+        
+        switch shftmethod
+            case 'multitaper'
+                % [S,F,T] = my_cmtm2(tmp(1,wskip(idec)+1:end),sfreqdec,4,fd.noverlap(idec),fd.wlength(idec));
+            case 'spectrogram'
+                %                 ar_coeffs = aryule(data,7);
+                %                 [ar_coeffs,NoiseVariance] = aryule(data,order)
+                %                                 [ar_coeffs,NoiseVariance,reflect_coeffs] = aryule(data,7);
+                if obj.prew(idec) == -1
+                    if obj.debuglevel==2, disp(['   computing spectrogram with 1st diff. prewhitening ...']); end
+                    [S,F,T] = spectrogram(diff(data),wnd,obj.noverlap(idec),obj.wlength(idec),obj.sratedec(idec));
+                elseif obj.prew(idec) == 0
+                    if obj.debuglevel==2, disp(['   computing spectrogram without prewhitening ...']); end
+                    [S,F,T] = spectrogram(data,wnd,obj.noverlap(idec),obj.wlength(idec),obj.sratedec(idec));
+                end
+                    %                 [S,F,T] = spectrogram(filter([0 -ar_coeffs(2:end)],1,data),wnd,obj.noverlap(idec),obj.wlength(idec),obj.sratedec(idec));
+        end
+        %fac = 2./(obj.sratedec(idec)*sum(abs(wnd(1:numel(wnd))).^2)); % accounts for the effect of the taper somewhow
+        %         S = S*sqrt(fac);
+        % undo effect of taper ; outout is in mV/km*sec or in mV/nT*sec
+        S = S/sqrt(wnd'*wnd)/sqrt(obj.wlength(idec))*2;
+        % undo effect of prewhitening
+        if obj.prew(idec) == -1
+            FF = F(:,ones(1,size(S,2)));            
+            S = S./(1i*2*pi*FF)*obj.sratedec(idec);
+        end
+        % calibration factors
+        cal = interp1(obj.caldata{ich}(1,:),obj.caldata{ich}(2,:).* ...
+            exp(1i*obj.caldata{ich}(3,:)*pi/180),F(1:end));
+        if ts.ppsdelay > 0
+            cal = cal.*exp(-1i*2*pi*F*ts.ppsdelay*1e-6);
+        end
+        if 1
+            if strfind(ts.system,'EDE')
+                fac = 1/1.018;
+                switch ts.chnames{ich}
+                    case {'Ex' 'Ey'}
+                        %                     caldata(1,:) = [0.0078    0.0110    0.0156    0.0221    0.0313    0.0442    0.0625    0.0884    0.1250    0.1768    0.2500    0.3536    0.5000    0.7071    1.0000    1.4142    2.0000    2.8284 ...
+                        %                         4.0000    5.6569    8.0000   11.3137   16.0000   22.6274   32.0000   45.2548   64.0000   90.5097  128.0000  181.0193  256.0000  362.0387  512.0000 1024 10000 100000];
+                        %                     caldata(2,:) = [   1.1281 - 0.1424i   1.0363 - 0.0649i   1.0146 - 0.0508i   1.0063 - 0.0328i   0.9983 - 0.0193i   0.9946 - 0.0128i   0.9926 - 0.0087i   0.9905 - 0.0065i   0.9910 - 0.0040i ...
+                        %                         0.9909 - 0.0029i   0.9906 - 0.0018i   0.9906 - 0.0008i   0.9920 - 0.0004i   0.9907 - 0.0006i   0.9915 - 0.0005i   0.9917 - 0.0002i   0.9911 - 0.0001i   0.9910 - 0.0003i ...
+                        %                         0.9905 - 0.0002i   0.9904 - 0.0005i   0.9907 - 0.0002i   0.9908 - 0.0002i   0.9909 - 0.0002i   0.9905 + 0.0004i   0.9905 - 0.0000i   0.9909 + 0.0005i   0.9901 - 0.0011i ...
+                        %                         0.9906 + 0.0000i   0.9903 + 0.0002i   0.9908 - 0.0003i   0.9879 - 0.0015i   0.9886 + 0.0013i   0.9929 - 0.0052i 1 1 1];
+                        %                     caldata(3,:) = [   1.3276 + 0.0311i   1.1525 + 0.0825i   1.10 + 0.08i   1.0637 + 0.0744i   1.0362 + 0.0582i   1.0200 + 0.0434i   1.0113 + 0.0320i   1.0033 + 0.0231i   1.0043 + 0.0175i ...
+                        %                         1.0024 + 0.0108i   1.0045 + 0.0079i   1.0031 + 0.0016i   1.0114 + 0.0014i   0.9956 - 0.0027i   0.9873 - 0.0070i   0.9859 - 0.0003i   0.9984 - 0.0007i   0.9990 + 0.0007i ...
+                        %                         0.9994 + 0.0002i   0.9992 + 0.0005i   0.9990 - 0.0003i   0.9985 + 0.0001i   0.9989 + 0.0003i   0.9990 + 0.0001i   0.9988 + 0.0011i   0.9998 - 0.0007i   1.0000 + 0.0009i ...
+                        %                         0.9988 + 0.0009i   0.9982 + 0.0000i   1.0026 - 0.0022i   1.0007 + 0.0009i   1.0048 + 0.0055i   0.9992 + 0.0006i 1 1 1];
+                        %                     fac = interp1(1./caldata(1,:),1./(caldata(ich+1,:)),F(1:end),'pchip','extrap');
+                        
+                        %ede with correct timing
+                        fac = fac*exp(+1i*2*pi*F*0.00079);
+                        %fac = fac*exp(1i*2*pi*F*(0.00075-0.00055));
+                        cal = cal.*fac;
+                    otherwise
+                        cal = cal.*fac;
+                end
+            end
+        end
+        if 0
+            if strfind(ts.system,'SP4')
+                fac = 1;
+                caldata(1,:) = [0.0078    0.0110    0.0156    0.0221    0.0313    0.0442    0.0625    0.0884    0.1250    0.1768    0.2500    0.3536    0.5000    0.7071    1.0000    1.4142    2.0000    2.8284 ...
+                    4.0000    5.6569    8.0000   11.3137   16.0000   22.6274   32.0000   45.2548   64.0000   90.5097  128.0000  181.0193  256.0000  362.0387  512.0000 1024 10000 100000];
+                caldata(2,:) = [1.0349 + 0.2750i   0.9968 + 0.1910i   0.9979 + 0.1500i   0.9850 + 0.1115i   0.9820 + 0.0768i   0.9804 + 0.0547i   0.9793 + 0.0390i   0.9787 + 0.0278i   0.9776 + 0.0192i ...
+                    0.9777 + 0.0133i   0.9779 + 0.0096i   0.9773 + 0.0054i   0.9788 + 0.0035i   0.9762 + 0.0011i   0.9751 - 0.0003i   0.9774 + 0.0007i   0.9735 + 0.0003i   0.9765 - 0.0001i ...
+                    0.9770 + 0.0002i   0.9776 + 0.0002i   0.9773 + 0.0005i   0.9759 + 0.0004i   0.9770 + 0.0004i   0.9769 + 0.0003i   0.9782 - 0.0000i   0.9773 + 0.0003i   0.9775 - 0.0010i ...
+                    0.9762 - 0.0009i   0.9763 - 0.0001i   0.9795 + 0.0004i   0.9748 + 0.0008i   0.9874 - 0.0017i   0.9735 + 0.0044i   0.9735 + 0.0044i 0.9735 + 0.0044i 0.9735 + 0.0044i];
+                caldata(3,:) = caldata(2,:);
+                caldata(4,:) = caldata(2,:);
+                caldata(5,:) = caldata(2,:);
+                caldata(6,:) = caldata(2,:);
+                fac = interp1(1./caldata(1,:),1./(caldata(ich+1,:)),F(1:end),'pchip','extrap');
+                cal = cal.*fac;
+            end
+        end
+        cal(1) = cal(2);
+        
+        % bug fix for nans in metronix calibration
+        % files
+        indnan = find(isnan(cal));
+        if ~isempty(indnan)
+            cal(indnan) =  0.0051 + 0.2000i;
+        end
+        %% hardwired: read calibration data for electric channels for RMT measurements+
+        % change only between here
+        %         switch obj.chnames{ich}
+        %             case 'Ex'
+        %                 fidc = fopen('D:\local\dev\trunk\spectra/EFeldx.cal','r');
+        %                 tmp = fgetl(fidc);
+        %                 cdat= fscanf(fidc,'%f %f %f',[3 inf]);
+        %                 fclose(fidc);
+        %                 cal = interp1(cdat(1,:),sqrt(10.^(cdat(2,:)./10)).* ...
+        %                     exp(-1i*cdat(3,:)*pi/180),F(1:end));
+        %             case 'Ey'
+        %                 fidc = fopen('D:\local\dev\trunk\spectra/EFeldx.cal','r');
+        %                 tmp = fgetl(fidc);
+        %                 cdat= fscanf(fidc,'%f %f %f',[3 inf]);
+        %                 fclose(fidc);
+        %                 cal = interp1(cdat(1,:),sqrt(10.^(cdat(2,:)./10)).* ...
+        %                     exp(1i*cdat(3,:)*pi/180),F(1:end));
+        %         end
+        % and here
+        %%
+        for ik = 1:size(S,3)
+            S(:,:,ik) = S(:,:,ik)./repmat(cal,1,size(S,2)); 
+        end
+        
+        T0              = win1(idec)*(obj.wlength(idec)-obj.noverlap(idec))./obj.sratedec(idec);
+        T1              = T(1)+T0;
+        T2              = T(end)+T0;
+        dT              = T(2)-T(1);     % seconds since reftime
+        if ich == 1 %% only update for the very first channels, other channels should be the same!!
+        obj.W(idec,:)   = obj.W(idec,1)+[1 numel(T)];
+        end
+        obj.T(idec,:)   = [T1 T2 dT];
+        obj.F(idec,:)   = [F(1) F(end) F(2)-F(1)];
+        obj.Nsets(idec) = numel(T);
+        obj.Nf(idec)    = numel(F);
+        k               = size(S,3);
+        F(1)            = 1;
+        
+        F(1) = 0;        
+        for ik = 1:size(S,3)
+            fwrite(fid,real(S(:,:,ik).'),'float32');
+            fwrite(fid,imag(S(:,:,ik).'),'float32');
+        end
+        fwrite(fid,ones(size(S(:,:,1).')),'uint8');
+        % additional information added to global
+        % header
+        obj.Nsets(idec) = size(S,2);
+        obj.Nf(idec)    = size(S,1);
+        %         obj.Nk(idec)    = size(S,3);
+        if ich == 1
+            tmp = ftell(fid);
+            fseek(fid,header_pos,'bof');
+            if numel(size(S))==2
+                fwrite(fid,[size(S) 1],'int32'); % size of data in that decimation level
+            else
+                fwrite(fid,size(S),'int32'); % size of data in that decimation level
+            end
+            fwrite(fid,[obj.W(idec,1) obj.W(idec,2)],'int32');   % window ids % uncommented this and
+            
+            % JK, changed 'float32' to 'float64', to see why, just run:            
+            % tst = [1801009.175 1806008.825 0.15];
+            % fid = fopen('test.dat','w'); fwrite(fid,tst,'float32'); fclose(fid);
+            % fid = fopen('test.dat','r'); tst2 = fread(fid,[1 3],'float32'); fclose(fid);
+            % disp(tst - tst2)
+            % OLD VERSION
+            % fwrite(fid,[obj.T(idec,1) obj.T(idec,2) obj.T(idec,3)],'float32'); % central time of window with respect to reftime, and time increment,
+            % MODIFIED VERSION
+            fwrite(fid,[obj.T(idec,1) obj.T(idec,2) obj.T(idec,3)],'float64'); % central time of window with respect to reftime, and time increment,
+            
+            fwrite(fid,[obj.F(idec,1) obj.F(idec,2) obj.F(idec,3)],'float32'); % frequnecies
+            %fwrite(fid,[first_window last_window last_window-first_window],'float32'); % frequnecies
+            header_pos = ftell(fid);
+            Nfc = numel(S)+Nfc;
+            fseek(fid,tmp,'bof');
+        end
+        clear S;
+        
+    end
+    %disp(obj.W);
+end
+fclose(fid);

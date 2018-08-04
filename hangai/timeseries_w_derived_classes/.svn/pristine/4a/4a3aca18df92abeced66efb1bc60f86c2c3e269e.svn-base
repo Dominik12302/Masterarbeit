@@ -1,0 +1,768 @@
+%%
+% class definition of EMTimeSeries
+%
+classdef EMTimeSeries % discrete block model
+    properties  
+        propath = {''};     % project path
+        tspath  = {'./ts/'};% path were the date are to be found is fullfile(tspath, datapath)
+        datapath= {'./adc/EDE/meas*','./adc/ADU/meas*' ,'./adc/spam4/run*','./adc/MTU/run*'}; % read data found in this subdirectories
+        procpath= {'./proc'}; % store any processed (resampled, converted) data here
+        fcpath  = {'./fc'}; % store fourier coefficients here
+        tfpath  = {'./tf'}; % output directory for transfer function estimates (not used so far)
+        calpath = {'./s'};  % calibration files
+        lsname  = {};       % name of local site
+        lsrate  = [];       % desired sampling rate of the local site i.e. 500
+        bsname  = {};       % cell array with name of base sites
+        bsrate  = [];       % array of sampling rates of of base sites i.e. [500 512] 
+        resmpfreq = 0;        
+        delay_filter = 0;       
+        notch_filter = 0;
+        usech   = {'Ex' 'Ey' 'Bx' 'By' 'Bz'};        
+        premult = [];
+        chorder = [];
+        usetime = [];
+        usesites= {'all'};
+        usesrates=[];       % if empty, use all sampling rates; else provide array with numbers
+        % sp properties
+        tsdef   = [];       % 
+        spdef   = [];       % struct providing default values for EMSpectra objects
+        debuglevel= 1;
+        debugtext = {};
+        % map
+        latlim   = [];
+        lonlim = [];
+        demlat = [];
+        demlon = [];
+        site    = {};        
+    end
+    properties (Dependent = false,  SetAccess = private)
+        reftime = [1970 01 01 00 00 00];
+    end
+    properties (Dependent = true,  SetAccess = private)
+        lsind               % index into local site: local time series objects are available from obj.site{obj.lsind}
+        lNruns              % number of runs for local site
+        lsrates             % available sampling schemes for local site
+        lsrateind           % index vector  into runs at local site with sampling rate obj.lsrate;
+                            % to access these, use obj.sites{obj.lsind}(obj.lsrateind)
+        localsite           % the time series objects of the local site for the desired sampling rate srate
+        
+        bsind
+        bNruns
+        bsrates
+        bsrateind
+        basesite            % the time series objects of the base sites for the base site at sampling obj.bsrate
+        
+        atsfiles            % convert data from local site into ats format and store in procpath
+        afcfiles            % compute spectra for local site and store in fcpath
+        refname             % this are the site names of sites which overlap in time with the recording at the local site
+        usesitesind         % index into currently used sites
+        srates              % sampling rates of sites and runs
+        sratesusedsites     % sampling rates of the usesites for all runs
+        useind              % index into sites and runs matching usesites and usesrates
+        sites
+        snames
+        runtimes
+    end
+    methods
+        function obj    = EMTimeSeries(varargin)
+            if nargin == 2
+                if isa(varargin{1},'EMTimeSeries') && iscell(varargin{2})
+                    obj         = varargin{1}; % Creates EMTimeSeries object from file with values of given ede object
+                    sites       = varargin{2};
+                    [obj]       = emts_import(obj,sites);
+                elseif numel(varargin{1})==6 && isdir(varargin{2}{1})
+                    if ishandle(obj.debuglevel)
+                        obj.debugtext = [obj.debugtext ...
+                            {'-----------------------------------------'} ...
+                            {[' - Project directory is ' varargin{2}{1}]} ...
+                            {[' - reftime is ' datestr(varargin{1})]} ...
+                            {['-----------------------------------------']}];
+                    elseif obj.debuglevel, 
+                        disp(['-----------------------------------------']);
+                        disp([' - Project directory is ' varargin{2}{1}]); 
+                        disp([' - reftime is ' datestr(varargin{1})]); 
+                        disp(['-----------------------------------------']);
+                    end
+                    obj.reftime = varargin{1};
+                    obj.propath = varargin{2};
+                else
+                    if ~isdir(varargin{2}{1})
+                        disp(['**Error: Project ' varargin{2}{1} ' does not exist!'])
+                    else
+                        disp(['**Error: Unknown format of input args']);
+                    end
+                    return; 
+                end
+            elseif nargin == 1
+                if isdir(varargin{1})     % Creates new ede object from files in given directory with default values
+                    % if obj.debuglevel, disp([' - Entering directory is ' varargin{1}]); end
+                    % obj = ede_read(obj,varargin{1});
+                else return; end
+            elseif nargin >= 3
+                if isa(varargin{1},'EMTimeSeries')
+                    
+                end
+            end
+        end        
+        function lsind = get.lsind(obj)
+            lsind = [];
+            if ~isempty(obj.lsname), lsind = find(strcmp(obj.sites,obj.lsname{1})); end
+            if isempty(lsind) && ~isempty(obj.lsname), if obj.debuglevel, disp([' - Warning: could not find local site ',obj.lsname{1}]); end; end
+        end
+        function lNruns = get.lNruns(obj)
+            lNruns = 0;
+            if ~isempty(obj.lsind), lNruns = numel(obj.site{obj.lsind}); end
+        end
+        function lsrates = get.lsrates(obj)
+            lsrates = [];
+            if ~isempty(obj.lsind)
+                for is = 1:obj.lNruns, lsrates(is) = obj.site{obj.lsind}{is}.srate; end
+            end
+        end
+        function lsrateind = get.lsrateind(obj)
+            lsrateind = [];
+            if ~isempty(obj.lsrate),
+                lsrateind = find(obj.lsrates == obj.lsrate);
+                
+                if isempty(lsrateind)
+                    if obj.debuglevel, disp([' - Warning: could not find recordings at ' num2str(obj.lsrate) ' Hz']); end
+                end
+            end
+        end
+        function bsind     = get.bsind(obj)
+            bsind = [];
+            if ~isempty(obj.bsname),
+                d = 0;
+                for ibs = 1:numel(obj.bsname)
+                    ind = find(strcmp(obj.sites,obj.bsname{ibs})); 
+                    if ~isempty(ind)
+                        d = d+1;
+                        bsind(d) = ind;
+                    else
+                        if obj.debuglevel, disp([' - Warning: could not find base site ',obj.bsname{ibs}]); end;
+                    end
+                end
+            end
+        end
+        function bNruns    = get.bNruns(obj)
+            bNruns = 0;
+            if ~isempty(obj.lsind), 
+                for ibs = 1:numel(obj.bsind)
+                bNruns(ibs) = numel(obj.site{obj.bsind(ibs)}); 
+                end
+            end
+        end
+        function bsrates   = get.bsrates(obj)
+            bsrates = [];
+            if ~isempty(obj.bsind)
+                for ibs = 1:numel(obj.bsind)
+                    for is = 1:obj.bNruns(ibs), bsrates{ibs}(is) = obj.site{obj.bsind(ibs)}{is}.srate; end
+                end
+            end
+        end
+        function bsrateind = get.bsrateind(obj)
+            bsrateind = {};
+            
+            if ~isempty(obj.bsrate),
+                for ibs = 1:numel(obj.bsind)
+                    ind = [];
+                    for isr = 1:numel(obj.bsrate)
+                        ind = [ind find(obj.bsrates{ibs} == obj.bsrate(isr))];
+                    end
+                    bsrateind{ibs} = ind;
+                end
+            else
+                for ibs = 1:numel(obj.bsind)
+                    bsrateind{ibs} = 1:numel(obj.bsrates{ibs});
+                end
+            end             
+        end
+        function localsite = get.localsite(obj)
+            localsite = {};
+            lsind     = obj.lsind;
+            lsrateind = obj.lsrateind;
+            if ~isempty(lsind) && ~isempty(lsrateind), localsite = obj.site{obj.lsind}(lsrateind); end
+        end
+        function basesite  = get.basesite(obj)
+            basesite = {};
+            bsind     = obj.bsind;
+            bsrateind = obj.bsrateind;
+            if ~isempty(bsind) && ~isempty(bsrateind),
+                for ibs = 1:numel(bsind)
+                    basesite{ibs} = obj.site{obj.bsind(ibs)}(bsrateind{ibs}); 
+                end
+            end
+        end
+        function atsfiles  = get.atsfiles(obj)
+            lts = obj.localsite;
+            for il = 1:numel(lts)
+                ts = lts{il};
+                if ~isempty(obj.usetime)
+                    ts.usesmp    = get_usesmp(ts,obj.usetime);
+                else
+                    ts.usesmp = [1 ts.Nsmp];
+                end
+                ts.resmpfreq = obj.resmpfreq;     
+                ts.delay_filter = obj.delay_filter; 
+                ts.notch_filter = obj.notch_filter; 
+                ia = 0;                
+                ts.usech = [];
+                for ilch = 1:ts.Nch
+                    chind = find(strcmp(obj.usech,ts.chnames{ilch}));
+                    if ~isempty(chind)
+                        ia = ia+1;
+                        ts.usech(ia) = ilch;
+                    end
+                end
+                % output directory
+                [aa,bb,c]=fileparts(ts.source{1});
+                [a,b,c]=fileparts(aa);
+                ts.atsoutdir = {fullfile(obj.propath{1},obj.lsname{1},obj.tspath{1},obj.procpath{1},b,bb)};
+                if ~isempty(ts.usesmp) && ~isempty(ts.usech)
+                    atsfiles{il} = ts.atsfile;
+                end
+
+            end
+        end        
+        function afcfiles  = get.afcfiles(obj)
+            lts = obj.localsite;
+            for il = 1:numel(lts)
+                ts = lts{il};
+                if ~isempty(obj.usetime)
+                    ts.usesmp    = get_usesmp(ts,obj.usetime);
+                else
+                    ts.usesmp = [1 ts.Nsmp];
+                end
+                ts.resmpfreq = obj.resmpfreq;     
+                ts.delay_filter = obj.delay_filter;           
+                ts.notch_filter = obj.notch_filter;                 
+                ia = 0;
+                ts.usech = [];
+                for ilch = 1:ts.Nch
+                    chind = find(strcmp(obj.usech,ts.chnames{ilch}));
+                    if ~isempty(chind)
+                        ia = ia+1;
+                        ts.usech(ia) = ilch;
+                    end
+                end
+                % output directory
+                [aa,bb,c]=fileparts(ts.source{1});
+                [a,b,c]=fileparts(aa);
+                afcoutdir = {fullfile(obj.propath{1},obj.lsname{1},obj.fcpath{1},b,bb)};
+                if ~isempty(ts.usesmp) && ~isempty(ts.usech)
+                    sp          = EMSpectra;                % Initilaize an EMSpectra object
+                    sp.reftime  = obj.reftime;                  % this is the reftime which will overwrite the reftime property in the adu object
+                    sp.source   = afcoutdir;    % Here the spectra will be stored
+                    sp.caldir{1}   = fullfile(obj.propath{1},obj.calpath{1});
+                    if ~isempty(obj.spdef)
+                        spdef       = fieldnames(obj.spdef);
+                        for ispdef = 1:numel(spdef)
+                            if isprop(sp,spdef{ispdef})
+                                sp = setfield(sp,spdef{ispdef},getfield(obj.spdef,spdef{ispdef}));
+                            end
+                        end
+                    end
+                    sp          = EMSpectra(sp,ts);        % This triggers the spectrogram computation
+                    afcfiles{il} = sp.source;
+                else
+                    afcfiles{il} = [];
+                end
+            end
+        end        
+        function srates    = get.srates(obj)
+            srates = [];
+            for is = 1:numel(obj.sites)
+                for ir = 1:numel(obj.site{is})
+                    srates{is}(ir) = obj.site{is}{ir}.srate;
+                end
+            end
+        end
+        function sites     = get.sites(obj)
+            sites = cell(1,numel(obj.site));
+            for ind = 1 : numel(obj.site)
+                sites{ind} = obj.site{ind}{1}.name;
+                for ind2 = 2 : numel(obj.site{ind})
+                    if ~isequal(sites{ind},obj.site{ind}{ind2}.name);
+                        disp('Warning: Runs have different sitenames, using first!');
+                    end
+                end
+            end
+        end
+        function sratesusedsites = get.sratesusedsites(obj)
+            sratesusedsites = obj.srates(obj.usesitesind);
+        end
+        function usesitesind = get.usesitesind(obj)
+            if strcmp(obj.usesites,'all')
+                sind = 1:numel(obj.sites);
+            else
+                sind = [];
+                for is = 1:numel(obj.usesites)
+                    tmp = strfind(obj.sites,obj.usesites{is});
+                    sind = [sind tmp{1}];
+                end
+            end
+            usesitesind = sind;
+        end
+        function useind    = get.useind(obj)
+            useind = {};
+            id     = 1;
+            for is = 1:numel(obj.usesitesind)
+                k = obj.usesitesind(is);
+                if ~isempty(obj.usesrates)
+                    for ir = 1:numel(obj.srates{k})
+                        if any(obj.usesrates == obj.srates{k}(ir))
+                            useind{id} = [k,ir];
+                            id = id+1;
+                        end
+                    end
+                else
+                    for ir = 1:numel(obj.srates{k})
+                        useind{id} = [k,ir];
+                        id = id+1;
+                    end       
+                end
+            end
+        end
+        function runtimes  = get.runtimes(obj)
+            runtimes = {};
+            useind = obj.useind;
+            site = obj.site;
+            for ir = 1:numel(useind)
+                st = useind{ir}(1);
+                r = useind{ir}(2);
+                tsite = site{st}{r};
+                start = tsite.starttime;
+                start(6) = start(6)+tsite.starttimems/1000;
+                stop = tsite.stoptime;
+                stop(6) = stop(6)+tsite.stoptimems/1000;
+                runtimes{ir} = [start stop];
+            end
+        end
+        function snames     = get.snames(obj)
+            ind = obj.useind;
+            for ir = 1:numel(ind)
+                snames(ir) = obj.sites(ind{ir}(1));
+            end
+        end
+        function varargout = plot(obj,varargin)
+            if nargin
+                if any(strcmp(varargin,'time'))
+                    ind = find(strcmp(varargin,'time'));
+                    time = varargin{ind+1};
+                else
+                    time = 'utc';
+                end
+                if any(strcmp(varargin,'newplot'))
+                    ind = find(strcmp(varargin,'newplot'));
+                    newplot = varargin{ind+1};
+                else
+                    newplot = 0;
+                end
+                if any(strcmp(varargin,'units'))
+                    ind = find(strcmp(varargin,'units'));
+                    units = varargin{ind+1};
+                else
+                    units = 'mV';
+                end
+                if any(strcmp(varargin,'color'))
+                    ind = find(strcmp(varargin,'color'));
+                    col = varargin{ind+1};
+                else
+                    col = 'k';
+                end
+                if any(strcmp(varargin,'elim'))
+                    ind = find(strcmp(varargin,'elim'));
+                    elim = varargin{ind+1};
+                else
+                    elim = 'auto';
+                end
+                if any(strcmp(varargin,'axes'))
+                    ind = find(strcmp(varargin,'axes'));
+                    hax = varargin{ind+1};
+                else
+                    hax = [];
+                end
+                if any(strcmp(varargin,'factor'))
+                    ind = find(strcmp(varargin,'factor'));
+                    fac = varargin{ind+1};
+                else
+                    fac = [];
+                end
+            else
+                time  = 'smp'; units = 'mV'; hax    = []; fac   = [];
+            end
+            if strcmp(units,'physical'), units = 'mV/m'; end
+            if isempty(hax)
+                figure;
+                switch time
+                    case {'utc','UTC'}, x1 = datenum(obj.usetime(1:6)); x2 = datenum(obj.usetime(7:12));
+                    case 'relative smp', 
+                        x1 = etime(obj.usetime(1:6),obj.reftime)*obj.resmpfreq+1;
+                        x2 = etime(obj.usetime(7:12),obj.reftime)*obj.resmpfreq;
+                    case 'relative s',
+                        x1 = etime(obj.usetime(1:6),obj.reftime);
+                        x2 = etime(obj.usetime(7:12),obj.reftime);
+                    case 'relative h',
+                        x1 = etime(obj.usetime(1:6),obj.reftime)/3600;
+                        x2 = etime(obj.usetime(7:12),obj.reftime)/3600;
+                    case 'relative d',
+                        x1 = etime(obj.usetime(1:6),obj.reftime)/3600/24;
+                        x2 = etime(obj.usetime(7:12),obj.reftime)/3600/24;                    
+                end
+                xl = [x1 x2];                   
+                set(gcf,'Position',[42 309  1170 663]);
+                tag = obj.usech;
+                for ich = 1:numel(obj.usech)
+                    hax(ich) = axes;
+                    set(hax(ich),'tag',obj.usech{ich});
+                    h   = 0.8/numel(obj.usech)-0.03;
+                    if ich == numel(obj.usech)
+                        h0       = (numel(obj.usech)-ich)*h+0.15;
+                        set(hax(ich),'Position',[0.15 h0 0.8 h],'Fontsize',14,'box','on','Nextplot','add','XGrid','on', 'Ygrid','on','Xlim',xl);
+                        xlabel(['time (' time ')'],'Fontsize',14);
+                        ylabel([obj.usech{ich} ' (' units ')']);
+                        ylim(elim);
+                    elseif ich == 1
+                        h0       = (numel(obj.usech)-ich)*h+0.15;
+                        set(hax(ich),'Position',[0.15 h0+(numel(obj.usech)-ich)*0.03 0.8 h],'Fontsize',14,'box','on','XAxisLocation','top','Nextplot','add','XGrid','on', 'Ygrid','on','Xlim',xl);
+                        ylabel([obj.usech{ich} ' (' units ')'],'Fontsize',14);
+                        ylim(elim);
+                    else
+                        h0       = (numel(obj.usech)-ich)*h+0.15;
+                        set(hax(ich),'Position',[0.15 h0+(numel(obj.usech)-ich)*0.03 0.8 h],'Fontsize',14,'box','on','XTickLabel',[],'Nextplot','add','XGrid','on', 'Ygrid','on','Xlim',xl);
+                        ylabel([obj.usech{ich} ' (' units ')'],'Fontsize',14);
+                        ylim(elim);
+                    end
+                end
+            elseif newplot && numel(hax) == numel(obj.usech) % this is for plotting into the gui
+                switch time
+                    case {'utc','UTC'}, x1 = datenum(obj.usetime(1:6)); x2 = datenum(obj.usetime(7:12));
+                    case 'relative smp', 
+                        x1 = etime(obj.usetime(1:6),obj.reftime)*obj.resmpfreq+1;
+                        x2 = etime(obj.usetime(7:12),obj.reftime)*obj.resmpfreq;
+                    case 'relative s',
+                        x1 = etime(obj.usetime(1:6),obj.reftime);
+                        x2 = etime(obj.usetime(7:12),obj.reftime);
+                    case 'relative h',
+                        x1 = etime(obj.usetime(1:6),obj.reftime)/3600;
+                        x2 = etime(obj.usetime(7:12),obj.reftime)/3600;
+                    case 'relative d',
+                        x1 = etime(obj.usetime(1:6),obj.reftime)/3600/24;
+                        x2 = etime(obj.usetime(7:12),obj.reftime)/3600/24;
+                    otherwise
+                end
+                xl = [x1 x2];                   
+                %                 set(gcf,'Position',[42 309  1170 663]);
+                                tag = obj.usech;
+                for ich = 1:numel(obj.usech)
+                    axes(hax(ich));
+                    set(hax(ich),'tag',obj.usech{ich});
+                    h   = 0.8/numel(obj.usech)-0.03;
+                    if ich == numel(obj.usech)
+                        h0       = (numel(obj.usech)-ich)*h+0.15;
+                        set(hax(ich),'Position',[0.2 h0 0.72 h],'Visible','on','Fontsize',12,'Fontname','Helvetica','box','on','Nextplot','add','XGrid','on', 'Ygrid','on','Xlim',xl);
+                        xlabel(['time (' time ')'],'Fontsize',14);
+                        hyl = ylabel([obj.usech{ich} ' (' units ')'],'Fontsize',14);
+                        set(hyl,'tag','ts_ylabel');
+                        ylim(elim);
+                    elseif ich == 1
+                        h0       = (numel(obj.usech)-ich)*h+0.15;
+                        set(hax(ich),'Position',[0.2 h0+(numel(obj.usech)-ich)*0.03 0.72 h],'Visible','on','Fontsize',12,'Fontname','Helvetica','Fontname','Helvetica','box','on','XAxisLocation','top','Nextplot','add','XGrid','on', 'Ygrid','on','Xlim',xl);
+                        hyl=ylabel([obj.usech{ich} ' (' units ')'],'Fontsize',14);
+                        set(hyl,'tag','ts_ylabel');
+                        ylim(elim);
+                    else
+                        h0       = (numel(obj.usech)-ich)*h+0.15;
+                        set(hax(ich),'Position',[0.2 h0+(numel(obj.usech)-ich)*0.03 0.72 h],'Visible','on','Fontsize',12,'Fontname','Helvetica','box','on','XTickLabel',[],'Nextplot','add','XGrid','on', 'Ygrid','on','Xlim',xl);
+                        hyl = ylabel([obj.usech{ich} ' (' units ')'],'Fontsize',14);
+                        set(hyl,'tag','ts_ylabel');
+                        ylim(elim);
+                    end
+                end
+            else
+                if numel(hax) ~= numel(obj.usech)
+                    disp('** Error plot: Number of axis handles must match number of channels to plot (check obj.usech)');
+                    return
+                else
+                    for ich = 1:numel(hax), 
+                        set(hax(ich),'Nextplot','add'); 
+                        tag{ich} = get(hax(ich),'tag');
+                    end
+                    % find the appropriate axes
+                end
+            end
+            lts = obj.localsite;
+            leg{1} = lts{1}.name;
+            legcol{1} = col;
+            ileg = 1;
+            for il = 1:numel(lts)
+                ts = lts{il};
+                ts.usesmp = get_usesmp(ts,obj.usetime);
+                ts.resmpfreq = obj.resmpfreq;
+                ts.delay_filter = obj.delay_filter;
+                ts.notch_filter = obj.notch_filter;                 
+                ia = 0;
+                ts.usech = [];
+                for ilch = 1:ts.Nch
+                    chind = find(strcmp(tag,ts.chnames{ilch}));
+                    if ~isempty(chind)
+                        ia = ia+1;
+                        useax(ia) = chind;
+                        ts.usech(ia) = ilch;
+                    end
+                end
+                if ~isempty(ts.usesmp) && ~isempty(ts.usech)
+                   hax(useax) = plot(ts,'time',time,'axes',hax(useax),'units',units,'color',col,'elim',elim,'factor',fac);
+                   % make all axes the same x scale
+                   %xl = get(hax(useax(1)),'Xlim');
+                   for ich = 1:numel(obj.usech)
+                       %set(hax(ich),'Xlim',xl);
+                       switch time
+                           case {'utc','UTC'}, datetick(hax(ich),'x','keeplimits');
+                       end
+                       if ich == 1
+                           set(hax(ich),'XAxisLocation','top');
+                       elseif ich == numel(obj.usech)
+                           set(hax(ich),'XAxisLocation','bottom');
+                       else
+                           set(hax(ich),'XTickLabel',[]);
+                       end
+                   end
+                end
+            end
+            base = obj.basesite;
+            col = lines(numel(base)); % changed from jet %JK 25.11.2015
+            for ibs = 1:numel(base)
+                bts = base{ibs};
+                ileg = ileg +1;
+                leg{ileg} = bts{1}.name;
+                legcol{ileg} = col(ibs,:);
+                useax = [];
+                for il = 1:numel(bts)
+                    ts = bts{il};
+                    ts.usesmp = get_usesmp(ts,obj.usetime);
+                    ts.resmpfreq = obj.resmpfreq;
+                    ts.delay_filter = obj.delay_filter;
+                    ts.notch_filter = obj.notch_filter;                     
+                    ia = 0;
+                    ts.usech = [];
+                    for ilch = 1:ts.Nch
+                        chind = find(strcmp(tag,ts.chnames{ilch}));
+                        if ~isempty(chind)
+                            ia = ia+1;
+                            useax(ia) = chind;
+                            ts.usech(ia) = ilch;
+                        end
+                    end
+                    if ~isempty(ts.usesmp) && ~isempty(ts.usech)
+                        hax(useax) = plot(ts,'time',time,'axes',hax(useax),'units',units,'color',col(ibs,:),'elim',elim);
+                    end
+                    
+                end
+            end
+%             if ~isempty(findobj(EM_ts,'Tag','ts_leg'))
+%                 delete(findobj(EM_ts,'Tag','ts_leg'));
+%             end
+%                 a = get(findobj(EM_ts,'Tag','ts_leg'),'Children');
+%                 for ichild = 1:numel(a)
+%                    delete(a{ichild})
+%                 end
+%             end
+                
+            % %             else
+            %                 % legend
+            
+            lax = axes;
+            handles.ts_leg = lax;
+            % %             end
+            set(lax,'Position',[0.2 0.08 0.72 0.05],'Fontsize',14,'Fontname','Helvetica','XTick',[], 'YTick',[],'Ylim',[-1 1],'Xlim',[0 numel(leg)],'Visible','off','tag','ts_leg');
+            hold on
+            axes(lax);
+            %delete(get(gca,'Children'));
+            for ileg = 1:numel(leg)
+                text(ileg-1/2,0,leg{ileg},'Fontsize',14,'Color',legcol{ileg},'Fontweight','bold','Horizontalalignment','center','Verticalalignment','top');
+            end
+            switch time
+                case 'utc'
+                    xl = xlim(hax(1));
+                    timestr = datestr(xl(1),6);
+                    text(0,.8,timestr,'Fontsize',14,'Fontweight','bold','Horizontalalignment','center');
+                    timestr = datestr(xl(2),6);
+                    text(numel(leg),.8,timestr,'Fontsize',14,'Fontweight','bold','Horizontalalignment','center')
+            end
+            hold off;
+            if nargout, varargout = {hax}; else varargout = {}; end
+        end
+        function plotruntimes(obj,varargin)
+            if nargin
+                if any(strcmp(varargin,'time'))
+                    ind = find(strcmp(varargin,'time'));
+                    time = varargin{ind+1};
+                else
+                    time = 'utc';
+                end
+                if any(strcmp(varargin,'systems'))
+                    ind = find(strcmp(varargin,'systems'));
+                    sys = varargin{ind+1};
+                else
+                    sys = [];
+                end
+                if any(strcmp(varargin,'Nsites'))
+                    ind = find(strcmp(varargin,'Nsites'));
+                    Nsites = varargin{ind+1};
+                else
+                    Nsites = 10;
+                end
+                if any(strcmp(varargin,'axes'))
+                    ind = find(strcmp(varargin,'axes'));
+                    hax = varargin{ind+1};
+                    delete(get(hax,'Children'));
+                else
+                    hax = [];
+                end
+                if any(strcmp(varargin,'srates'))
+                    ind = find(strcmp(varargin,'srates'));
+                    srates = varargin{ind+1};
+                else
+                    srates = [];
+                end
+            end
+            obj.usesrates = srates;
+            runtimes = obj.runtimes;
+            ind = obj.useind;
+            ylab = []; isy = 0;
+            for ir = 1:numel(runtimes)
+                is = ind{ir}(1);
+                sr = ind{ir}(2);
+                system{ir} = obj.site{is}{sr}.system;
+                %if strcmp(sys,system{ir})
+                if isempty(ylab)
+                    ylab{1} = obj.sites{ind{ir}(1)};
+                    isy = isy+1;
+                elseif ~strcmp(ylab,obj.sites{ind{ir}(1)})
+                    ylab{end+1} = obj.sites{ind{ir}(1)};
+                    isy = isy+1;
+                end
+                switch time
+                    case 'utc'
+                        start = datenum(runtimes{ir}(1:6));
+                        stop  = datenum(runtimes{ir}(7:12));
+                    case 'relative s'
+                        start = etime(runtimes{ir}(1:6),obj.reftime);
+                        stop  = etime(runtimes{ir}(7:12),obj.reftime);
+                    case 'relative h'
+                        start = etime(runtimes{ir}(1:6),obj.reftime)/3600;
+                        stop  = etime(runtimes{ir}(7:12),obj.reftime)/3600;
+                    case 'relative d'
+                        start = etime(runtimes{ir}(1:6),obj.reftime)/3600/24;
+                        stop  = etime(runtimes{ir}(7:12),obj.reftime)/3600/24;
+                end
+                x(ir,:) = [start start stop stop];
+                y(ir,:) = [isy-0.3 isy+0.3 isy+0.3 isy-0.3];
+                c(ir)   = 1;
+                runstr{ir} = [num2str(sr,'%03d')];
+                runstrxy(ir,:)   = [isy (start+stop)/2];
+                switch system{ir}(1:3)
+                    case 'EDE'
+                        cdata(ir,:)   = [.3 1 .3];
+                    case 'ADU'
+                        cdata(ir,:)   = [1 .3 .3];
+                    otherwise
+                        cdata(ir,:)   = [.7 .7 .7];
+                end
+                %end
+            end
+            if isempty(hax)
+                figure;
+                set(gcf,'Position',[42 309  1170 663]);
+                hax = axes;
+            end
+            axes(hax);
+            set(hax,'Nextplot','replace','XTickmode','auto'); plot(1,1); delete(get(hax,'children'));
+            p = patch(x',y',c,'Edgecolor',[0.3 .3 .3]);
+            set(p,'FaceColor','flat',...
+                'FaceVertexCData',cdata)
+            set(gca,'Ytick',[1:numel(ylab)],'YTicklabel',ylab,'Ygrid','on','Fontsize',12,'box','on','Yaxislocation','right');
+            hold on
+            for ir = 1:numel(runstr)
+                text(runstrxy(ir,2),runstrxy(ir,1),runstr{ir},'Fontsize',12,'HorizontalAlignment','center');
+            end
+            switch time
+                case 'utc'
+                    datetick('x',6,'keepticks');
+            end
+            ylim([0 Nsites+1]);
+            xlabel(time,'Fontsize',14)
+        end
+        function plotmap(obj,what,varargin)
+            for is = 1:numel(obj.sites)
+                lat(is) = obj.site{is}{1}.lat;
+                lon(is) = obj.site{is}{1}.lon;
+                name(is)= {obj.site{is}{1}.name};
+            end
+            if ~isempty(varargin)
+                if ishandle(varargin{1})
+                    h = varargin{1};
+                    figure(h);
+                    ax = gca;
+                    set(gca,'Nextplot','add');
+                else
+                    h = figure;
+                    set(gcf,'Position',[ 469         281        1153         687]);
+                    ax = axis;
+                    axis equal;
+                    set(gca,'YDir','normal','Fontsize',14,'box','on','Nextplot','add')
+                    ylabel('Northing (km)','Fontsize',14);
+                    xlabel('Easting (km)','Fontsize',14);
+                end
+            else
+                h = figure;
+                set(gcf,'Position',[ 469         281        1153         687]);
+                ax = axis;
+                axis equal;
+                set(gca,'YDir','normal','Fontsize',14,'box','on','Nextplot','add')
+                ylabel('Northing (km)','Fontsize',14);
+                xlabel('Easting (km)','Fontsize',14);
+            end
+            switch what
+                case 'stations'
+                    if isempty(obj.latlim) || isempty(obj.lonlim)
+                        m_proj('UTM','longitude',[min(lon) max(lon)],'latitude',[min(lat) max(lat)],'rectbox','on','ell','wgs84');
+                        [y,x] = m_ll2xy(lon,lat);
+                        plot(y/1000,x/1000,'or','Markersize',5,'Markerfacecolor',[1 0 0]);
+                        text(y/1000,x/1000,name);
+                    else
+                        plot(lon,lat,'or','Markersize',5,'Markerfacecolor',[1 0 0]);
+                        text(lon,lat,name);
+                    end
+                
+            end
+            
+            
+        end
+        function h = plotdem(obj,type)
+            
+            if isempty(obj.latlim) || isempty(obj.lonlim)
+                for is = 1:numel(obj.sites)
+                    lat(is) = obj.site{is}{1}.lat;
+                    lon(is) = obj.site{is}{1}.lon;
+                    name(is)= {obj.site{is}{1}.name};
+                end
+                obj.lonlim = [min(lon) max(lon)];
+                obj.latlim = [min(lat) max(lat)];
+            end
+            latlim = unique(floor(obj.latlim));
+            lonlim = unique(floor(obj.lonlim));
+            [p,n,ext] = fileparts(obj.propath{1});
+            curp = cd(obj.propath{1});
+            X = readhgt(latlim,lonlim,'merge',type,'interp','crop',[obj.latlim obj.lonlim],'plot');
+            %             obj.demlat = X.lat;
+            %             obj.demlon = X.lon;
+            %             obj.demZ   = X.z;
+            cd(curp);
+            set(gca,'Nextplot','add');
+            h = gcf;
+        end
+    end 
+end % classdef
+

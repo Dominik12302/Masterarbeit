@@ -1,0 +1,149 @@
+%% load MCD regression plots with changing alpha and make them nice!
+
+%% For 7205B
+xlimit = [0.01 20000];
+ylimit = [1 1E5];
+ylabelcorr = [0.0025 0 0];
+width = [0 0 100 0]; % substracted from position
+
+
+
+openfig('7205B_MCDregress0.5_24hrs_coh0.8.fig')
+set(gcf,'renderer','painter','Color','w','Position',get(gcf,'Position')-width);
+axes = get(gcf,'children');
+
+% phase
+set(axes(1),'xlim',xlimit);
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+yaxis = get(axes(1),'children');
+dataY = get(yaxis,'YData');
+dataY{2} = dataY{2}-180;
+set(yaxis,'YData',[dataY{1};dataY{2}]);
+
+
+yyaxis right
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'Fontsize',12.1);
+
+% app. resistivity
+set(axes(2),'xlim',xlimit);
+set(axes(2),'ylim',ylimit);
+yhandle = get(axes(2),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+set(get(axes(2),'Title'),'String','7205B - MCD regression, \alpha = 0.5')
+
+export_fig('7205B_MCDregress0.5_24hrs_coh0.8.png','-painters','-r300','-p0.01')
+
+%%
+openfig('7205B_MCDregress0.6_24hrs_coh0.8.fig')
+set(gcf,'renderer','painter','Color','w','Position',get(gcf,'Position')-width);
+axes = get(gcf,'children');
+
+% phase
+set(axes(1),'xlim',xlimit);
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+yyaxis right
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'Fontsize',12.1);
+
+% app. resistivity
+set(axes(2),'xlim',xlimit);
+set(axes(2),'ylim',ylimit);
+yhandle = get(axes(2),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+set(get(axes(2),'Title'),'String','7205B - MCD regression, \alpha = 0.6')
+
+export_fig('7205B_MCDregress0.6_24hrs_coh0.8.png','-painters','-r300','-p0.01')
+
+%%
+openfig('7205B_MCDregress0.75_24hrs_coh0.8.fig')
+set(gcf,'renderer','painter','Color','w','Position',get(gcf,'Position')-width);
+axes = get(gcf,'children');
+
+% phase
+set(axes(1),'xlim',xlimit);
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+yyaxis right
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'Fontsize',12.1);
+
+% app. resistivity
+set(axes(2),'xlim',xlimit);
+set(axes(2),'ylim',ylimit);
+yhandle = get(axes(2),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+set(get(axes(2),'Title'),'String','7205B - MCD regression, \alpha = 0.75')
+
+export_fig('7205B_MCDregress0.75_24hrs_coh0.8.png','-painters','-r300','-p0.01')
+
+
+%%
+openfig('7205B_MCDregress0.9_24hrs_coh0.8.fig')
+set(gcf,'renderer','painter','Color','w','Position',get(gcf,'Position')-width);
+axes = get(gcf,'children');
+
+% phase
+set(axes(1),'xlim',xlimit);
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+yyaxis right
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'Fontsize',12.1);
+
+% app. resistivity
+set(axes(2),'xlim',xlimit);
+set(axes(2),'ylim',ylimit);
+yhandle = get(axes(2),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+set(get(axes(2),'Title'),'String','7205B - MCD regression, \alpha = 0.9')
+
+export_fig('7205B_MCDregress0.9_24hrs_coh0.8.png','-painters','-r300','-p0.01')
+
+
+%%
+openfig('7205B_MCDregress0.99_24hrs_coh0.8.fig')
+set(gcf,'renderer','painter','Color','w','Position',get(gcf,'Position')-width);
+axes = get(gcf,'children');
+
+% phase
+set(axes(1),'xlim',xlimit);
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+yyaxis right
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'Fontsize',12.1);
+
+% app. resistivity
+set(axes(2),'xlim',xlimit);
+set(axes(2),'ylim',ylimit);
+yhandle = get(axes(2),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+set(get(axes(2),'Title'),'String','7205B - MCD regression, \alpha = 0.99')
+
+export_fig('7205B_MCDregress0.599_24hrs_coh0.8.png','-painters','-r300','-p0.01')
+
+%%
+openfig('7205B_Mestimate_24hrs_coh0.7.fig')
+set(gcf,'renderer','painter','Color','w','Position',get(gcf,'Position')-width);
+axes = get(gcf,'children');
+
+% phase
+set(axes(1),'xlim',xlimit);
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+yyaxis right
+yhandle = get(axes(1),'Ylabel');
+set(yhandle,'Fontsize',12.1);
+
+% app. resistivity
+set(axes(2),'xlim',xlimit);
+set(axes(2),'ylim',ylimit);
+yhandle = get(axes(2),'Ylabel');
+set(yhandle,'position',get(yhandle,'position') + ylabelcorr);
+set(get(axes(2),'Title'),'String','7205B - M-estimator')
+
+export_fig('7205B_Mestimate_24hrs_coh0.7.png','-painters','-r300','-p0.01')
+
